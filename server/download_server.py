@@ -4,7 +4,7 @@
 @author: Jerry Lee
 @contact: liweizhong@nekteck.com
 @software: Yuanrui
-@file: server.py
+@file: download_server.py
 @time: 2021/10/9 15:51
 @desc:
 '''
@@ -43,6 +43,7 @@ def start(port):
 def stop():
     if http_server:
         http_server.shutdown()
+        http_server.server_close()
 
 
 def openUrl(port_number):
