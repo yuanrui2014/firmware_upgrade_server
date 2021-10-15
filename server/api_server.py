@@ -8,96 +8,74 @@
 @time: 2021/10/11 13:43
 @desc:
 '''
+import os
 from threading import Thread
 
-from PyQt5.QtCore import pyqtSignal
-from flask import Flask
-from flask_restful import reqparse, abort, Api, Resource
+from flask import Flask, make_response, send_from_directory, jsonify, request
+from werkzeug.serving import make_server
 
-app = Flask(__name__)
-api = Api(app)
+from utils import logger
 
-TODOS = {
-    'todo1': {'task': 'build an API'},
-    'todo2': {'task': '哈哈哈'},
-    'todo3': {'task': 'profit!'},
-}
+server = None
 
 
-def abort_if_todo_doesnt_exist(todo_id):
-    if todo_id not in TODOS:
-        abort(404, message="Todo {} doesn't exist".format(todo_id))
+class ServerThread(Thread):
+    def __init__(self, app, port):
+        Thread.__init__(self)
+        self.srv = make_server('0.0.0.0', port, app)
+        self.ctx = app.app_context()
+        self.ctx.push()
+
+    def run(self):
+        self.srv.serve_forever()
+
+    def shutdown(self):
+        self.srv.shutdown()
 
 
-parser = reqparse.RequestParser()
-parser.add_argument('task')
+def start_server(port, client):
+    global server
+    app = Flask('firmware upgrade server')
+
+    @app.route('/api/v1/upgrade/download/<filename>', methods=['GET'])
+    def download(filename):
+        exec_path = client.folder
+        file_path = '/'.join([exec_path, filename])
+        logger.info('download file {}'.format(file_path))
+        if os.path.exists(file_path) and (filename == client.filename):
+            mac = request.args.get('mac')
+
+            client.upgrade_signal.emit({'type': 'download', 'content': {'mac': mac}})
+
+            return make_response(send_from_directory(client.folder, filename, as_attachment=True))
+        else:
+            return '{}目录下没有找到名称为{}的文件'.format(exec_path, filename)
+
+    @app.route('/api/v1/upgrade/connect', methods=['GET'])
+    def connect():
+        mac = request.args.get("mac")
+        version = request.args.get("version")
+        finish = request.args.get("finish")
+
+        if finish is not None:
+            client.upgrade_signal.emit({'type': 'finish', 'content': {'version': version, 'mac': mac, 'finish': int(finish)}})
+        else:
+            client.upgrade_signal.emit({'type': 'connect', 'content': {'version': version, 'mac': mac}})
+
+        logger.info("{} connected, version: {}".format(mac, version))
+
+        return jsonify({'new_version': client.version, 'filename': client.filename})
+
+    server = ServerThread(app, port)
+    server.start()
+
+    logger.info("start server, port: {}, folder: {}, filename: {}".format(port, client.folder, client.filename))
 
 
-# Todo
-# shows a single todo item and lets you delete a todo item
-class Todo(Resource):
-    def get(self, todo_id):
-        abort_if_todo_doesnt_exist(todo_id)
-        return TODOS[todo_id]
+def stop_server():
+    global server
+    if server is not None:
+        server.shutdown()
+        server = None
 
-    def delete(self, todo_id):
-        abort_if_todo_doesnt_exist(todo_id)
-        del TODOS[todo_id]
-        return '', 204
-
-    def put(self, todo_id):
-        args = parser.parse_args()
-        task = {'task': args['task']}
-        TODOS[todo_id] = task
-        return task, 201
-
-
-# TodoList
-# shows a list of all todos, and lets you POST to add new tasks
-class TodoList(Resource):
-    def get(self):
-        return TODOS
-
-    def post(self):
-        args = parser.parse_args()
-        todo_id = int(max(TODOS.keys()).lstrip('todo')) + 1
-        todo_id = 'todo%i' % todo_id
-        TODOS[todo_id] = {'task': args['task']}
-        return TODOS[todo_id], 201
-
-
-class UpgradeConnect(Resource):
-    def __init__(self, client):
-        self.parser = reqparse.RequestParser()
-        self.parser.add_argument('version', required=True)
-        self.parser.add_argument('mac', required=True)
-        self.client = client
-
-    def get(self):
-        args = self.parser.parse_args()
-        version = args['version']
-        mac = args['mac']
-
-        self.client.upgrade_signal.emit({'version': version, 'mac': mac})
-
-        data = {'new_version': '1.0.2', 'bin_url': 'http://192.168.0.1:8000/test.bin'}
-
-        return data, 200
-
-
-def startServer(debug, port):
-    app.run(debug=debug, port=port)
-
-
-def start_service(debug, port, client):
-    ##
-    ## Actually setup the Api resource routing here
-    ##
-    #api.add_resource(TodoList, '/todos')
-    #api.add_resource(Todo, '/todos/<todo_id>')
-
-    api.add_resource(UpgradeConnect, '/api/v1/upgrade/connect', resource_class_kwargs={"client": client})
-
-    thread = Thread(target=startServer, args=[debug, port])
-    thread.start()
-
+    logger.info("stop the server")

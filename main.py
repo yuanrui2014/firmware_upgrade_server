@@ -2,17 +2,21 @@
 
 # Press Shift+F10 to execute it or replace it with your code.
 # Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
+import datetime
+import os
+import re
 import sys
 import time
 
-from PyQt5 import QtWidgets, Qt, QtGui
-from PyQt5.QtCore import pyqtSignal, QObject
+from PyQt5 import QtWidgets, QtGui
+from PyQt5.QtCore import pyqtSignal, QObject, Qt
 from PyQt5.QtGui import QStandardItemModel, QStandardItem
-from PyQt5.QtWidgets import QHeaderView, QItemDelegate, QPushButton, QHBoxLayout, QWidget, QFileDialog, QMessageBox
+from PyQt5.QtWidgets import QItemDelegate, QPushButton, QHBoxLayout, QWidget, QFileDialog, QMessageBox, QTableView
 
-from server.download_server import start, openUrl, stop
-from server.api_server import start_service
+from server.api_server import start_server, stop_server
+from server.udp_broadcast import UdpBroadcast
 from ui.Ui_main import Ui_MainWindow
+from utils import logger
 
 
 class AutomationButtonDelegate(QItemDelegate):
@@ -42,6 +46,57 @@ class AutomationButtonDelegate(QItemDelegate):
 class UpgradeSignal(QObject):
     upgrade_signal = pyqtSignal(dict)
 
+    def __init__(self):
+        super(UpgradeSignal, self).__init__()
+        self._filename = ''
+        self._folder = ''
+        self._version = ''
+
+    @property
+    def filename(self):
+        return self._filename
+
+    @filename.setter
+    def filename(self, value):
+        head, tail = os.path.split(value)
+        self._filename = tail
+
+    @property
+    def folder(self):
+        return self._folder
+
+    @folder.setter
+    def folder(self, value):
+        self._folder = os.path.dirname(value)
+
+    @property
+    def version(self):
+        return self._version
+
+    @version.setter
+    def version(self, value):
+        self._version = value
+
+
+ERROR_CODE_DESC = {
+    0: 'OK',
+    -1: 'Failure',
+    0x101: 'Out of memory',
+    0x102: 'Invalid argument',
+    0x103: 'Invalid state',
+    0x104: 'Invalid size',
+    0x105: 'Requested resource not found',
+    0x106: 'Operation or feature not supported',
+    0x107: 'Operation timed out',
+    0x108: 'Received response was invalid',
+    0x109: 'CRC or checksum was invalid',
+    0x10A: 'Version was invalid',
+    0x10B: 'MAC address was invalid',
+    0x3000: 'Starting number of WiFi error codes',
+    0x4000: 'Starting number of MESH error codes',
+    0x6000: 'Starting number of flash error codes'
+}
+
 
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
@@ -53,77 +108,185 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.file_list = {}
 
-        self.COLUMNS = ['No.', 'Time', 'MAC', 'Version']
+        self.COLUMNS = ['No.', 'Time', 'MAC', 'Version', 'Status']
 
         self.tableview_model = QStandardItemModel()
 
         # 所有列自动拉伸，充满界面
         self.tableview_model.setColumnCount(len(self.COLUMNS))
         self.tableview_model.setHorizontalHeaderLabels(self.COLUMNS)
-        self.ui.tableView_clients.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.ui.tableView_clients.horizontalHeader().setDefaultSectionSize(150)
+        self.ui.tableView_clients.horizontalHeader().resizeSection(0, 100)  # 设置第1列的宽度
+        self.ui.tableView_clients.horizontalHeader().resizeSection(0, 200)  # 设置第2列的宽度
+        self.ui.tableView_clients.horizontalHeader().resizeSection(0, 200)  # 设置第3列的宽度
+        self.ui.tableView_clients.horizontalHeader().resizeSection(0, 150)  # 设置第4列的宽度
+        self.ui.tableView_clients.horizontalHeader().setStyleSheet("QHeaderView::section {""color: black;padding-left: 4px;border: 1px solid #6c6c6c;}")
+
+        font = self.ui.tableView_clients.horizontalHeader().font()
+        font.setBold(True)
+        self.ui.tableView_clients.horizontalHeader().setFont(font)
+
+        self.ui.tableView_clients.horizontalHeader().setHighlightSections(True)
+        self.ui.tableView_clients.setEditTriggers(QTableView.NoEditTriggers)
+        self.ui.tableView_clients.setAlternatingRowColors(True)
+
+        self.ui.tableView_clients.verticalHeader().setVisible(False)
+
         self.ui.tableView_clients.setModel(self.tableview_model)
 
         self.ui.pushButton_upgrade_file.clicked.connect(self.pushButton_import_clicked)
 
         self.ui.pushButton_action.clicked.connect(self.pushButton_action_clicked)
 
+        self.ui.lineEdit_upgrade_file_path.textChanged.connect(self.lineEdit_upgrade_file_changed)
+
         self.upgrade_signal = UpgradeSignal()
         self.upgrade_signal.upgrade_signal.connect(self.upgrade_signal_accept)
 
-        start_service(False, port=8080, client=self.upgrade_signal)
+        self.udp_broadcast = None
 
     def closeEvent(self, a0: QtGui.QCloseEvent) -> None:
-        stop()
+        self.stop()
+
+    def stop(self):
+        if self.udp_broadcast is not None:
+            self.udp_broadcast.shutdown()
+        stop_server()
 
     def pushButton_import_clicked(self):
-        filename, _ = QFileDialog.getOpenFileName(self, 'Open file', 'c:\\', "upgrade files (*.bin)")
+        filename, _ = QFileDialog.getOpenFileName(self, caption='Open file', directory='', filter="upgrade files (*.bin)")
 
         if filename is not None and len(filename) > 0:
-            try:
-                self.ui.lineEdit_upgrade_file_path.setText(filename)
-            except Exception as e:
-                QMessageBox.information(self, self.windowTitle(), "indicated file error, {}".format(repr(e)))
+            self.ui.lineEdit_upgrade_file_path.setText(filename)
 
-    def upgrade_signal_accept(self, msg):
-        try:
-            data = msg
-            print(data)
+    def __exists(self, mac):
+        for i in range(0, self.tableview_model.rowCount()):
+            if self.tableview_model.item(i, 2).text() == mac:
+                return i
+        return -1
 
-            for i in range(0, self.tableview_model.rowCount()):
-                if self.tableview_model.item(i, 2) == msg['mac']:
-                    print('repeated mac address {}'.format(msg['mac']))
-                    return
-
+    def do_connect(self, msg):
+        index = self.__exists(msg['mac'])
+        if index < 0:
             items = []
 
             item_no = QStandardItem()
-            item_no.setText(str(self.tableview_model.rowCount()+1))
+            item_no.setText(str(self.tableview_model.rowCount() + 1))
+            item_no.setData(Qt.AlignCenter, role=Qt.TextAlignmentRole)
             items.append(item_no)
 
             item_time = QStandardItem()
             item_time.setText(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
+            item_time.setData(Qt.AlignCenter, role=Qt.TextAlignmentRole)
             items.append(item_time)
 
             item_mac = QStandardItem()
             item_mac.setText(msg['mac'])
+            item_mac.setData(Qt.AlignCenter, role=Qt.TextAlignmentRole)
             items.append(item_mac)
 
             item_version = QStandardItem()
             item_version.setText(msg['version'])
+            item_version.setData(Qt.AlignCenter, role=Qt.TextAlignmentRole)
             items.append(item_version)
 
+            item_status = QStandardItem()
+            item_status.setText('connected')
+            item_status.setData(Qt.AlignCenter, role=Qt.TextAlignmentRole)
+            items.append(item_status)
+
             self.tableview_model.appendRow(items)
+
+    def do_download(self, msg):
+        index = self.__exists(msg['mac'])
+
+        if index >= 0:
+            self.tableview_model.item(index, 4).setText('downloading')
+
+    def do_finish(self, msg):
+        index = self.__exists(msg['mac'])
+
+        if index < 0:
+            return
+
+        finish = msg['finish']
+        finish_str = "download successfully" if finish == 0 else "download failure, error: {}, {}".format(finish, ERROR_CODE_DESC[finish])
+        self.tableview_model.item(index, 4).setText(finish_str)
+        self.tableview_model.item(index, 3).setText(msg['version'])
+
+        file_path = os.getcwd()  # 获取当前工作路径
+        filename = "{}\\{}.csv".format(file_path, datetime.date.today().strftime('%Y%m%d'))
+
+        if not os.path.exists(filename):
+            f = open(filename, "w")
+            COLUMNS = ['No.', 'Time', 'MAC', 'Version', 'Status']
+            header = ",".join(COLUMNS)
+            f.write("{}\n".format(header))
+        else:
+            f = open(filename, "a")
+
+        row = "{},{},{},{},{}\n".format(self.tableview_model.item(index, 0).text(), self.tableview_model.item(index, 1).text(), self.tableview_model.item(index, 2).text(),
+                                        self.tableview_model.item(index, 3).text(), self.tableview_model.item(index, 4).text())
+        f.write(row)
+
+        f.close()
+
+    def upgrade_signal_accept(self, msg):
+        try:
+            logger.info('upgrade signal, msg: {}'.format(msg))
+
+            data_type = msg['type']
+
+            handlers = {'download': self.do_download, 'connect': self.do_connect, 'finish': self.do_finish}
+
+            handlers[data_type](msg['content'])
+
         except Exception as e:
-            print("error message")
+            print("error message, {}".format(repr(e)))
+
+    def get_firmware_version(self, filename):
+        folder, name = os.path.split(filename)
+        match_obj = re.match(r'(.*)_v(.*)\.bin$', name, re.M | re.I)
+
+        return match_obj.group(2)
 
     def pushButton_action_clicked(self):
-        if self.ui.pushButton_action.text() == "Start":
-            port_number = 8000
-            start(port_number)
-            self.ui.pushButton_action.setText("Stop")
-        else:
-            stop()
-            self.ui.pushButton_action.setText("Start")
+        filename = self.ui.lineEdit_upgrade_file_path.text().strip()
+        if len(filename) <= 0:
+            QMessageBox.information(self, self.windowTitle(), "upgrade file is empty")
+            return
+
+        try:
+            if self.ui.pushButton_action.text() == "Start":
+                self.upgrade_signal.filename = filename
+                self.upgrade_signal.folder = filename
+                self.upgrade_signal.version = self.get_firmware_version(filename)
+
+                logger.info("folder: {}, filename: {}, version: {}".format(self.upgrade_signal.folder, self.upgrade_signal.filename, self.upgrade_signal.version))
+
+                self.udp_broadcast = UdpBroadcast(8888)
+                self.udp_broadcast.start()
+
+                start_server(port=8080, client=self.upgrade_signal)
+
+                self.ui.pushButton_action.setText("Stop")
+
+                self.ui.lineEdit_upgrade_file_path.setEnabled(False)
+                self.ui.pushButton_upgrade_file.setEnabled(False)
+            else:
+                self.udp_broadcast.shutdown()
+                self.udp_broadcast = None
+
+                stop_server()
+
+                self.ui.pushButton_action.setText("Start")
+                self.ui.lineEdit_upgrade_file_path.setEnabled(True)
+                self.ui.pushButton_upgrade_file.setEnabled(True)
+        except Exception as e:
+            QMessageBox.warning(self, self.windowTitle(), repr(e))
+
+    def lineEdit_upgrade_file_changed(self, text):
+        pass
 
 
 # Press the green button in the gutter to run the script.
