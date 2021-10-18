@@ -45,7 +45,7 @@ def start_server(port, client):
         if os.path.exists(file_path) and (filename == client.filename):
             mac = request.args.get('mac')
 
-            client.upgrade_signal.emit({'type': 'download', 'content': {'mac': mac}})
+            client.callback_signal.emit({'type': 'download', 'content': {'mac': mac}})
 
             return make_response(send_from_directory(client.folder, filename, as_attachment=True))
         else:
@@ -58,13 +58,29 @@ def start_server(port, client):
         finish = request.args.get("finish")
 
         if finish is not None:
-            client.upgrade_signal.emit({'type': 'finish', 'content': {'version': version, 'mac': mac, 'finish': int(finish)}})
+            client.callback_signal.emit({'type': 'finish', 'content': {'version': version, 'mac': mac, 'finish': int(finish)}})
         else:
-            client.upgrade_signal.emit({'type': 'connect', 'content': {'version': version, 'mac': mac}})
+            client.callback_signal.emit({'type': 'connect', 'content': {'version': version, 'mac': mac}})
 
         logger.info("{} connected, version: {}".format(mac, version))
 
         return jsonify({'new_version': client.version, 'filename': client.filename})
+
+    @app.route('/api/v1/product/verify', methods=['GET'])
+    def test():
+        mac = request.args.get("mac")
+        version = request.args.get("version")
+
+        if client.mac_addr_list is not None:
+            result = 'verified successfully' if mac in client.mac_addr_list else 'verified failure'
+        else:
+            result = 'MAC address file is invalid'
+
+        client.callback_signal.emit({'type': 'verify', 'content': {'version': version, 'mac': mac, 'result': result}})
+
+        logger.info("{} verified, version: {}".format(mac, version))
+
+        return jsonify({'code': version, 'msg': result})
 
     server = ServerThread(app, port)
     server.start()

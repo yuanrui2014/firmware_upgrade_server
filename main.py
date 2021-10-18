@@ -17,6 +17,7 @@ from server.api_server import start_server, stop_server
 from server.udp_broadcast import UdpBroadcast
 from ui.Ui_main import Ui_MainWindow
 from utils import logger
+from utils.funcs import read_xls_file
 
 
 class AutomationButtonDelegate(QItemDelegate):
@@ -43,14 +44,15 @@ class AutomationButtonDelegate(QItemDelegate):
             self.parent().setIndexWidget(index, widget)
 
 
-class UpgradeSignal(QObject):
-    upgrade_signal = pyqtSignal(dict)
+class CallbackSignal(QObject):
+    callback_signal = pyqtSignal(dict)
 
     def __init__(self):
-        super(UpgradeSignal, self).__init__()
+        super(CallbackSignal, self).__init__()
         self._filename = ''
         self._folder = ''
         self._version = ''
+        self._mac_addr_list = None
 
     @property
     def filename(self):
@@ -76,6 +78,14 @@ class UpgradeSignal(QObject):
     @version.setter
     def version(self, value):
         self._version = value
+
+    @property
+    def mac_addr_list(self):
+        return self._mac_addr_list
+
+    @mac_addr_list.setter
+    def mac_addr_list(self, value):
+        self._mac_addr_list = value
 
 
 ERROR_CODE_DESC = {
@@ -104,7 +114,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
 
-        self.setWindowTitle("Yuanrui upgrade server")
+        self.setWindowTitle("Yuanrui firmware utility")
 
         self.file_list = {}
 
@@ -135,13 +145,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.ui.tableView_clients.setModel(self.tableview_model)
 
         self.ui.pushButton_upgrade_file.clicked.connect(self.pushButton_import_clicked)
+        self.ui.pushButton_product_file.clicked.connect(self.pushButton_product_clicked)
 
         self.ui.pushButton_action.clicked.connect(self.pushButton_action_clicked)
 
         self.ui.lineEdit_upgrade_file_path.textChanged.connect(self.lineEdit_upgrade_file_changed)
 
-        self.upgrade_signal = UpgradeSignal()
-        self.upgrade_signal.upgrade_signal.connect(self.upgrade_signal_accept)
+        self.callback_signal = CallbackSignal()
+        self.callback_signal.callback_signal.connect(self.callback_signal_accept)
 
         self.udp_broadcast = None
 
@@ -159,49 +170,66 @@ class MainWindow(QtWidgets.QMainWindow):
         if filename is not None and len(filename) > 0:
             self.ui.lineEdit_upgrade_file_path.setText(filename)
 
+    def pushButton_product_clicked(self):
+        filename, _ = QFileDialog.getOpenFileName(self, caption='Open file', directory='', filter="xls files (*.xls)")
+
+        if filename is not None and len(filename) > 0:
+            self.ui.lineEdit_product_file_path.setText(filename)
+
     def __exists(self, mac):
         for i in range(0, self.tableview_model.rowCount()):
             if self.tableview_model.item(i, 2).text() == mac:
                 return i
         return -1
 
+    def __add_row(self, mac, version, status):
+        items = []
+
+        item_no = QStandardItem()
+        item_no.setText(str(self.tableview_model.rowCount() + 1))
+        item_no.setData(Qt.AlignCenter, role=Qt.TextAlignmentRole)
+        items.append(item_no)
+
+        item_time = QStandardItem()
+        item_time.setText(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
+        item_time.setData(Qt.AlignCenter, role=Qt.TextAlignmentRole)
+        items.append(item_time)
+
+        item_mac = QStandardItem()
+        item_mac.setText(mac)
+        item_mac.setData(Qt.AlignCenter, role=Qt.TextAlignmentRole)
+        items.append(item_mac)
+
+        item_version = QStandardItem()
+        item_version.setText(version)
+        item_version.setData(Qt.AlignCenter, role=Qt.TextAlignmentRole)
+        items.append(item_version)
+
+        item_status = QStandardItem()
+        item_status.setText(status)
+        item_status.setData(Qt.AlignCenter, role=Qt.TextAlignmentRole)
+        items.append(item_status)
+
+        self.tableview_model.appendRow(items)
+
     def do_connect(self, msg):
         index = self.__exists(msg['mac'])
         if index < 0:
-            items = []
-
-            item_no = QStandardItem()
-            item_no.setText(str(self.tableview_model.rowCount() + 1))
-            item_no.setData(Qt.AlignCenter, role=Qt.TextAlignmentRole)
-            items.append(item_no)
-
-            item_time = QStandardItem()
-            item_time.setText(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()))
-            item_time.setData(Qt.AlignCenter, role=Qt.TextAlignmentRole)
-            items.append(item_time)
-
-            item_mac = QStandardItem()
-            item_mac.setText(msg['mac'])
-            item_mac.setData(Qt.AlignCenter, role=Qt.TextAlignmentRole)
-            items.append(item_mac)
-
-            item_version = QStandardItem()
-            item_version.setText(msg['version'])
-            item_version.setData(Qt.AlignCenter, role=Qt.TextAlignmentRole)
-            items.append(item_version)
-
-            item_status = QStandardItem()
-            item_status.setText('connected')
-            item_status.setData(Qt.AlignCenter, role=Qt.TextAlignmentRole)
-            items.append(item_status)
-
-            self.tableview_model.appendRow(items)
+            self.__add_row(msg['mac'], version=msg['version'], status='connected')
 
     def do_download(self, msg):
         index = self.__exists(msg['mac'])
 
         if index >= 0:
             self.tableview_model.item(index, 4).setText('downloading')
+
+    def do_verify(self, msg):
+        index = self.__exists(msg['mac'])
+
+        if index >= 0:
+            self.tableview_model.item(index, 4).setText(msg['result'])
+        else:
+            self.__add_row(msg['mac'], version=msg['version'], status=msg['result'])
 
     def do_finish(self, msg):
         index = self.__exists(msg['mac'])
@@ -231,13 +259,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
         f.close()
 
-    def upgrade_signal_accept(self, msg):
+    def callback_signal_accept(self, msg):
         try:
             logger.info('upgrade signal, msg: {}'.format(msg))
 
             data_type = msg['type']
 
-            handlers = {'download': self.do_download, 'connect': self.do_connect, 'finish': self.do_finish}
+            handlers = {'download': self.do_download, 'connect': self.do_connect, 'finish': self.do_finish, 'verify': self.do_verify}
 
             handlers[data_type](msg['content'])
 
@@ -250,38 +278,64 @@ class MainWindow(QtWidgets.QMainWindow):
 
         return match_obj.group(2)
 
+    def _start_server(self, upgrade_filename, product_filename):
+        if upgrade_filename is not None:
+            self.callback_signal.filename = upgrade_filename
+            self.callback_signal.folder = upgrade_filename
+            self.callback_signal.version = self.get_firmware_version(upgrade_filename)
+
+        if product_filename is not None:
+            self.callback_signal.mac_addr_list = read_xls_file(product_filename)
+            logger.info("mac address list: {}".format(self.callback_signal.mac_addr_list))
+
+        logger.info("folder: {}, filename: {}, version: {}".format(self.callback_signal.folder, self.callback_signal.filename, self.callback_signal.version))
+
+        self.udp_broadcast = UdpBroadcast(8888)
+        self.udp_broadcast.start()
+
+        start_server(port=8080, client=self.callback_signal)
+
+        self.ui.pushButton_action.setText("Stop")
+
+        self.ui.lineEdit_upgrade_file_path.setEnabled(False)
+        self.ui.pushButton_upgrade_file.setEnabled(False)
+
+    def _stop_server(self):
+        self.udp_broadcast.shutdown()
+        self.udp_broadcast = None
+
+        stop_server()
+
+        self.ui.pushButton_action.setText("Start")
+        self.ui.lineEdit_upgrade_file_path.setEnabled(True)
+        self.ui.pushButton_upgrade_file.setEnabled(True)
+
     def pushButton_action_clicked(self):
-        filename = self.ui.lineEdit_upgrade_file_path.text().strip()
-        if len(filename) <= 0:
-            QMessageBox.information(self, self.windowTitle(), "upgrade file is empty")
+        if self.ui.checkBox_upgrade.isChecked():
+            upgrade_filename = self.ui.lineEdit_upgrade_file_path.text().strip()
+            if len(upgrade_filename) <= 0:
+                QMessageBox.information(self, self.windowTitle(), "upgrade file is empty")
+                return
+        else:
+            upgrade_filename = None
+
+        if self.ui.checkBox_product.isChecked():
+            product_filename = self.ui.lineEdit_product_file_path.text().strip()
+            if len(product_filename) <= 0:
+                QMessageBox.information(self, self.windowTitle(), "production file is empty")
+                return
+        else:
+            product_filename = None
+
+        if upgrade_filename is None and product_filename is None:
+            QMessageBox.information(self, self.windowTitle(), "No any chose functions")
             return
 
         try:
             if self.ui.pushButton_action.text() == "Start":
-                self.upgrade_signal.filename = filename
-                self.upgrade_signal.folder = filename
-                self.upgrade_signal.version = self.get_firmware_version(filename)
-
-                logger.info("folder: {}, filename: {}, version: {}".format(self.upgrade_signal.folder, self.upgrade_signal.filename, self.upgrade_signal.version))
-
-                self.udp_broadcast = UdpBroadcast(8888)
-                self.udp_broadcast.start()
-
-                start_server(port=8080, client=self.upgrade_signal)
-
-                self.ui.pushButton_action.setText("Stop")
-
-                self.ui.lineEdit_upgrade_file_path.setEnabled(False)
-                self.ui.pushButton_upgrade_file.setEnabled(False)
+                self._start_server(upgrade_filename, product_filename)
             else:
-                self.udp_broadcast.shutdown()
-                self.udp_broadcast = None
-
-                stop_server()
-
-                self.ui.pushButton_action.setText("Start")
-                self.ui.lineEdit_upgrade_file_path.setEnabled(True)
-                self.ui.pushButton_upgrade_file.setEnabled(True)
+                self._stop_server()
         except Exception as e:
             QMessageBox.warning(self, self.windowTitle(), repr(e))
 
