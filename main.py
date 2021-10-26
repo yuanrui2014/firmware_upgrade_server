@@ -10,13 +10,13 @@ import time
 
 from PyQt5 import QtWidgets, QtGui
 from PyQt5.QtCore import pyqtSignal, QObject, Qt
-from PyQt5.QtGui import QStandardItemModel, QStandardItem
+from PyQt5.QtGui import QStandardItemModel, QStandardItem, QBrush
 from PyQt5.QtWidgets import QItemDelegate, QPushButton, QHBoxLayout, QWidget, QFileDialog, QMessageBox, QTableView
 
 from server.api_server import start_server, stop_server
 from server.udp_broadcast import UdpBroadcast
 from ui.Ui_main import Ui_MainWindow
-from utils import logger
+from utils import logger, SUPPORT_UPGRADE, FIRMWARE_VERSION
 from utils.funcs import read_xls_file
 
 
@@ -118,18 +118,21 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.file_list = {}
 
-        self.COLUMNS = ['No.', 'Time', 'MAC', 'Version', 'Status']
+        self.COLUMNS = ['No.', 'Time', 'MAC', 'Version', 'Status', 'Server']
 
         self.tableview_model = QStandardItemModel()
+        self.ui.tableView_clients.setModel(self.tableview_model)
 
         # 所有列自动拉伸，充满界面
         self.tableview_model.setColumnCount(len(self.COLUMNS))
         self.tableview_model.setHorizontalHeaderLabels(self.COLUMNS)
-        self.ui.tableView_clients.horizontalHeader().setDefaultSectionSize(150)
-        self.ui.tableView_clients.horizontalHeader().resizeSection(0, 100)  # 设置第1列的宽度
-        self.ui.tableView_clients.horizontalHeader().resizeSection(0, 200)  # 设置第2列的宽度
-        self.ui.tableView_clients.horizontalHeader().resizeSection(0, 200)  # 设置第3列的宽度
-        self.ui.tableView_clients.horizontalHeader().resizeSection(0, 150)  # 设置第4列的宽度
+        #self.ui.tableView_clients.horizontalHeader().setDefaultSectionSize(150)
+        self.ui.tableView_clients.horizontalHeader().resizeSection(0, 50)  # 设置第1列的宽度
+        self.ui.tableView_clients.horizontalHeader().resizeSection(1, 120)  # 设置第2列的宽度
+        self.ui.tableView_clients.horizontalHeader().resizeSection(2, 120)  # 设置第3列的宽度
+        self.ui.tableView_clients.horizontalHeader().resizeSection(3, 300)  # 设置第4列的宽度
+        self.ui.tableView_clients.horizontalHeader().resizeSection(4, 300)  # 设置第5列的宽度
+        self.ui.tableView_clients.horizontalHeader().resizeSection(5, 200)  # 设置第6列的宽度
         self.ui.tableView_clients.horizontalHeader().setStyleSheet("QHeaderView::section {""color: black;padding-left: 4px;border: 1px solid #6c6c6c;}")
 
         font = self.ui.tableView_clients.horizontalHeader().font()
@@ -142,8 +145,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.ui.tableView_clients.verticalHeader().setVisible(False)
 
-        self.ui.tableView_clients.setModel(self.tableview_model)
-
         self.ui.pushButton_upgrade_file.clicked.connect(self.pushButton_import_clicked)
         self.ui.pushButton_product_file.clicked.connect(self.pushButton_product_clicked)
 
@@ -153,6 +154,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.callback_signal = CallbackSignal()
         self.callback_signal.callback_signal.connect(self.callback_signal_accept)
+
+        self.ui.pushButton_upgrade_file.setVisible(SUPPORT_UPGRADE)
+        self.ui.lineEdit_upgrade_file_path.setVisible(SUPPORT_UPGRADE)
+        self.ui.checkBox_upgrade.setVisible(SUPPORT_UPGRADE)
 
         self.udp_broadcast = None
 
@@ -165,13 +170,13 @@ class MainWindow(QtWidgets.QMainWindow):
         stop_server()
 
     def pushButton_import_clicked(self):
-        filename, _ = QFileDialog.getOpenFileName(self, caption='Open file', directory='', filter="upgrade files (*.bin)")
+        filename, _ = QFileDialog.getOpenFileName(self, caption='Open firmware file', directory='', filter="upgrade files (*.bin)")
 
         if filename is not None and len(filename) > 0:
             self.ui.lineEdit_upgrade_file_path.setText(filename)
 
     def pushButton_product_clicked(self):
-        filename, _ = QFileDialog.getOpenFileName(self, caption='Open file', directory='', filter="xls files (*.xls)")
+        filename, _ = QFileDialog.getOpenFileName(self, caption='Open device file', directory='', filter="excel files (*.xls, *.xlsx)")
 
         if filename is not None and len(filename) > 0:
             self.ui.lineEdit_product_file_path.setText(filename)
@@ -182,7 +187,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 return i
         return -1
 
-    def __add_row(self, mac, version, status):
+    def __add_row(self, mac, version, status, server=''):
         items = []
 
         item_no = QStandardItem()
@@ -210,7 +215,14 @@ class MainWindow(QtWidgets.QMainWindow):
         item_status.setData(Qt.AlignCenter, role=Qt.TextAlignmentRole)
         items.append(item_status)
 
+        item_server = QStandardItem()
+        item_server.setText(server)
+        item_server.setData(Qt.AlignCenter, role=Qt.TextAlignmentRole)
+        items.append(item_server)
+
         self.tableview_model.appendRow(items)
+
+        return self.tableview_model.rowCount() - 1
 
     def do_connect(self, msg):
         index = self.__exists(msg['mac'])
@@ -229,7 +241,14 @@ class MainWindow(QtWidgets.QMainWindow):
         if index >= 0:
             self.tableview_model.item(index, 4).setText(msg['result'])
         else:
-            self.__add_row(msg['mac'], version=msg['version'], status=msg['result'])
+            index = self.__add_row(msg['mac'], version=msg['version'], status=msg['result'], server=msg['server'])
+
+        item_version = self.tableview_model.item(index, 3)
+        item_version.setData(QBrush(Qt.red if msg['version'] != FIRMWARE_VERSION else Qt.green), role=Qt.BackgroundRole)
+        item_version.setText('firmware version is {}, new version is {}'.format(msg['version'], FIRMWARE_VERSION) if msg['version'] != FIRMWARE_VERSION else msg['version'])
+
+        item_result = self.tableview_model.item(index, 4)
+        item_result.setData(QBrush(Qt.red if msg['code'] != 0 else Qt.green), role=Qt.BackgroundRole)
 
     def do_finish(self, msg):
         index = self.__exists(msg['mac'])
@@ -247,8 +266,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         if not os.path.exists(filename):
             f = open(filename, "w")
-            COLUMNS = ['No.', 'Time', 'MAC', 'Version', 'Status']
-            header = ",".join(COLUMNS)
+            header = ",".join(self.COLUMNS)
             f.write("{}\n".format(header))
         else:
             f = open(filename, "a")

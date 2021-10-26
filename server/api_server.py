@@ -14,7 +14,7 @@ from threading import Thread
 from flask import Flask, make_response, send_from_directory, jsonify, request
 from werkzeug.serving import make_server
 
-from utils import logger
+from utils import logger, FIRMWARE_VERSION
 
 server = None
 
@@ -67,20 +67,24 @@ def start_server(port, client):
         return jsonify({'new_version': client.version, 'filename': client.filename})
 
     @app.route('/api/v1/product/verify', methods=['GET'])
-    def test():
+    def verify():
         mac = request.args.get("mac")
         version = request.args.get("version")
+        server = request.args.get("server")
 
+        code = 0
         if client.mac_addr_list is not None:
-            result = 'verified successfully' if mac in client.mac_addr_list else 'verified failure'
+            result = 'MAC address verified successfully' if mac in client.mac_addr_list else 'MAC address verified failure'
+            code = 0 if mac in client.mac_addr_list else 1
         else:
-            result = 'MAC address file is invalid'
+            result = 'No MAC address file'
+            code = 2
 
-        client.callback_signal.emit({'type': 'verify', 'content': {'version': version, 'mac': mac, 'result': result}})
+        client.callback_signal.emit({'type': 'verify', 'content': {'version': version, 'mac': mac, 'code': code, 'server': server, 'result': result}})
 
-        logger.info("{} verified, version: {}".format(mac, version))
+        logger.info("{} verified, version: {}, server: {}, code: {}".format(mac, version, server, code))
 
-        return jsonify({'code': version, 'msg': result})
+        return jsonify({'code': code, 'msg': result})
 
     server = ServerThread(app, port)
     server.start()
