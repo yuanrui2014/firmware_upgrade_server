@@ -40,7 +40,7 @@ def read_xls_file(filename):
         mac_addr_list = []
         for i in range(1, nrows):
             mac_addr = booksheet.cell_value(i, 4)
-            mac_addr_list.append(mac_addr)
+            mac_addr_list.append(mac_addr.upper())
     else:
         workbook = openpyxl.load_workbook(filename)
         booksheet = workbook.worksheets[0]  # 用索引取第一个sheet

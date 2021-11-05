@@ -68,7 +68,7 @@ def start_server(port, client):
 
     @app.route('/api/v1/product/verify', methods=['GET'])
     def verify():
-        mac = request.args.get("mac")
+        mac = request.args.get("mac").upper()
         version = request.args.get("version")
         server = request.args.get("server")
 
@@ -99,3 +99,4 @@ def stop_server():
         server = None
 
     logger.info("stop the server")
+

@@ -128,7 +128,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.tableview_model.setHorizontalHeaderLabels(self.COLUMNS)
         #self.ui.tableView_clients.horizontalHeader().setDefaultSectionSize(150)
         self.ui.tableView_clients.horizontalHeader().resizeSection(0, 50)  # 设置第1列的宽度
-        self.ui.tableView_clients.horizontalHeader().resizeSection(1, 120)  # 设置第2列的宽度
+        self.ui.tableView_clients.horizontalHeader().resizeSection(1, 130)  # 设置第2列的宽度
         self.ui.tableView_clients.horizontalHeader().resizeSection(2, 120)  # 设置第3列的宽度
         self.ui.tableView_clients.horizontalHeader().resizeSection(3, 300)  # 设置第4列的宽度
         self.ui.tableView_clients.horizontalHeader().resizeSection(4, 300)  # 设置第5列的宽度

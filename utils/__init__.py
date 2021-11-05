@@ -11,6 +11,7 @@
 
 import logging
 import os
+import configparser
 
 logger = logging.getLogger("firmware_upgrade_server")
 logger.setLevel(logging.DEBUG)
@@ -32,3 +33,32 @@ fileHandler.setFormatter(formatter)
 # add
 logger.addHandler(fileHandler)
 logger.addHandler(consoleHandler)
+
+# configuration
+basedir = os.getcwd()
+
+# production config takes precedence over env variables
+
+# production config file at ./project/config/production.cfg
+config_path = os.path.join(basedir, 'config.cfg')
+
+SUPPORT_UPGRADE = False
+FIRMWARE_VERSION = '1.0.1'
+
+
+# if config file exists, read it:
+if os.path.exists(config_path):
+    config = configparser.ConfigParser()
+
+    with open(config_path) as configfile:
+        config.read_file(configfile)
+
+    try:
+        SUPPORT_UPGRADE = config.getboolean('general', 'support_upgrade')
+    except (configparser.NoSectionError, configparser.NoOptionError):
+        SUPPORT_UPGRADE = False
+
+    try:
+        FIRMWARE_VERSION = config.get('general', 'firmware_version')
+    except (configparser.NoSectionError, configparser.NoOptionError):
+        FIRMWARE_VERSION = '1.0.1'
