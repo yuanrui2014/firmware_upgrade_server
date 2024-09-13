@@ -53,7 +53,7 @@ def start_server(port, client):
 
     @app.route('/api/v1/upgrade/connect', methods=['GET'])
     def connect():
-        mac = request.args.get("mac")
+        mac = request.args.get("mac").upper()
         version = request.args.get("version")
         finish = request.args.get("finish")
 
@@ -84,7 +84,13 @@ def start_server(port, client):
 
         logger.info("{} verified, version: {}, server: {}, code: {}".format(mac, version, server, code))
 
-        return jsonify({'code': code, 'msg': result})
+        if client.host_info is not None:
+            return jsonify({'code': code, 'msg': result, 'server': client.host_info['server'],
+                            'port': client.host_info['port'],
+                            'username': client.host_info['username'],
+                            'password': client.host_info['password']})
+        else:
+            return jsonify({'code': code, 'msg': result})
 
     server = ServerThread(app, port)
     server.start()

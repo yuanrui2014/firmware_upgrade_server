@@ -50,6 +50,6 @@ def read_xls_file(filename):
         mac_addr_list = []
         for i in range(2, nrows):
             mac_addr = booksheet.cell(i, 5).value
-            mac_addr_list.append(mac_addr)
+            mac_addr_list.append(mac_addr.upper())
 
     return mac_addr_list
