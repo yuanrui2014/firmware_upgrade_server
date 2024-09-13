@@ -18,6 +18,10 @@ from server.udp_broadcast import UdpBroadcast
 from ui.Ui_main import Ui_MainWindow
 from utils import logger, SUPPORT_UPGRADE, FIRMWARE_VERSION
 from utils.funcs import read_xls_file
+from utils.funcs import get_local_ip
+from utils.funcs import save_verify_mac_to_file
+from utils.funcs import get_current_time
+
 
 
 class AutomationButtonDelegate(QItemDelegate):
@@ -169,6 +173,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.udp_broadcast = None
 
+        self.ui.label_ip.setText("IP: " + get_local_ip())
+        save_verify_mac_to_file("\n"+get_current_time()+"\n", 0)
+        save_verify_mac_to_file("\n"+get_current_time()+"\n", 1)
+
     def closeEvent(self, a0: QtGui.QCloseEvent) -> None:
         self.stop()
 
@@ -249,6 +257,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         if index < 0:
             self.__add_row(msg['mac'], version=msg['version'], status='connected')
+            self.ui.tableView_clients.scrollToBottom()
 
     def do_download(self, msg, index):
 
@@ -261,6 +270,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.tableview_model.item(index, 4).setText(msg['result'])
         else:
             index = self.__add_row(msg['mac'], version=msg['version'], status=msg['result'], server=msg['server'])
+            self.ui.tableView_clients.scrollToBottom()
 
         item_version = self.tableview_model.item(index, 3)
         item_version.setData(QBrush(Qt.red if msg['version'] != FIRMWARE_VERSION else Qt.green), role=Qt.BackgroundRole)

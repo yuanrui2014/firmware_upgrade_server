@@ -15,6 +15,7 @@ from flask import Flask, make_response, send_from_directory, jsonify, request
 from werkzeug.serving import make_server
 
 from utils import logger, FIRMWARE_VERSION
+from utils.funcs import save_verify_mac_to_file
 
 server = None
 
@@ -83,6 +84,8 @@ def start_server(port, client):
         client.callback_signal.emit({'type': 'verify', 'content': {'version': version, 'mac': mac, 'code': code, 'server': server, 'result': result}})
 
         logger.info("{} verified, version: {}, server: {}, code: {}".format(mac, version, server, code))
+
+        save_verify_mac_to_file(mac, code)
 
         if client.host_info is not None:
             return jsonify({'code': code, 'msg': result, 'server': client.host_info['server'],

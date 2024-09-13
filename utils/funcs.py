@@ -13,6 +13,7 @@ import socket
 
 import xlrd
 import openpyxl
+import datetime
 
 
 def get_local_ip():
@@ -53,3 +54,31 @@ def read_xls_file(filename):
             mac_addr_list.append(mac_addr.upper())
 
     return mac_addr_list
+
+
+
+
+def get_current_time():
+    current_time = datetime.datetime.now()
+    return current_time.strftime("%Y-%m-%d %H:%M:%S")
+
+
+verify_fail_mac_path = os.path.join(os.getcwd(), 'verify_fail_mac.txt')
+verify_ok_mac_path = os.path.join(os.getcwd(), 'verify_ok_mac.txt')
+
+def _save_verify_mac_to_file(filename, content):
+    try:
+        with open(filename, 'a', encoding='utf-8') as file:
+            file.write(content + "\n")
+        print(f"内容已成功写入 {filename}")
+    except Exception as e:
+        print(f"写入文件时出错: {e}")
+
+
+
+def save_verify_mac_to_file(content, code):
+    if code == 0:
+        _save_verify_mac_to_file(verify_ok_mac_path, content)
+    elif code == 1:
+        _save_verify_mac_to_file(verify_fail_mac_path, content)
+
