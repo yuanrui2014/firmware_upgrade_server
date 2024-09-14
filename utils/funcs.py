@@ -14,6 +14,7 @@ import socket
 import xlrd
 import openpyxl
 import datetime
+from utils import logger
 
 
 def get_local_ip():
@@ -32,6 +33,7 @@ def read_xls_file(filename):
     :param filename:
     :return: testcase 列表
     """
+    cnt = 0
     if os.path.splitext(filename)[-1] == ".xls":
         workbook = xlrd.open_workbook(filename)
         booksheet = workbook.sheet_by_index(0)  # 用索引取第一个sheet
@@ -41,7 +43,9 @@ def read_xls_file(filename):
         mac_addr_list = []
         for i in range(1, nrows):
             mac_addr = booksheet.cell_value(i, 4)
-            mac_addr_list.append(mac_addr.upper())
+            if mac_addr is not None:
+                mac_addr_list.append(mac_addr.upper())
+                cnt += 1
     else:
         workbook = openpyxl.load_workbook(filename)
         booksheet = workbook.worksheets[0]  # 用索引取第一个sheet
@@ -51,8 +55,11 @@ def read_xls_file(filename):
         mac_addr_list = []
         for i in range(2, nrows):
             mac_addr = booksheet.cell(i, 5).value
-            mac_addr_list.append(mac_addr.upper())
+            if mac_addr is not None:
+                mac_addr_list.append(mac_addr.upper())
+                cnt += 1
 
+    logger.info("xls total: {}, Valid rows: {}".format(nrows, cnt))
     return mac_addr_list
 
 
